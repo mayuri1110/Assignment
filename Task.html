@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Crypto Chart</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #controls {
+            margin: 20px;
+        }
+        #chartContainer {
+            width: 80%;
+        }
+    </style>
+
+</head>
+<body>
+    <div id="controls">
+        <label for="coinSelect">Choose Cryptocurrency:</label>
+        <select id="coinSelect">
+            <option value="ethusdt">ETH/USDT</option>
+            <option value="bnbusdt">BNB/USDT</option>
+            <option value="dotusdt">DOT/USDT</option>
+        </select>
+
+        <label for="intervalSelect">Time Interval:</label>
+        <select id="intervalSelect">
+            <option value="1m">1 Minute</option>
+            <option value="3m">3 Minutes</option>
+            <option value="5m">5 Minutes</option>
+        </select>
+    </div>
+
+    <div id="chartContainer">
+        <canvas id="cryptoChart"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        let ws;
+        let chart;
+        const historicalData = {};
+
+        // Initialize Chart.js with empty data
+        const ctx = document.getElementById('cryptoChart').getContext('2d');
+        const initialData = {
+            labels: [],
+            datasets: [{
+                label: 'Close Price',
+                data: [],
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 2,
+                fill: false,
+                pointRadius: 1,
+                lineTension: 0.1
+            }]
+        };
+
+        // Function to create the chart with Chart.js
+        function createChart() {
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: initialData,
+                options: {
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute'
+                            }
+                        },
+                        y: {
+                            beginAtZero: false
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        // Fetch previous data from localStorage
+        function fetchPreviousData(coin, interval) {
+            const storedData = localStorage.getItem(`${coin}_${interval}`);
+            if (storedData) {
+                return JSON.parse(storedData);
+            }
+            return null;
+        }
+
+        // Update chart with new data
+        function updateChart(data) {
+            chart.data.labels = data.map(d => new Date(d[0]));  // Time of candlestick
+            chart.data.datasets[0].data = data.map(d => parseFloat(d[4]));  // Closing price
+            chart.update();
+        }
+
+        // Store data in localStorage for persistence
+        function storeData(coin, interval, data) {
+            localStorage.setItem(`${coin}_${interval}`, JSON.stringify(data));
+        }
+
+        // Handle new data from WebSocket
+        function handleWebSocketMessage(event) {
+            const message = JSON.parse(event.data);
+            if (message.k) {  // Ensure it's kline data
+                const { t, c } = message.k;  // Time, Close price
+                const currentCoin = document.getElementById('coinSelect').value;
+                const currentInterval = document.getElementById('intervalSelect').value;
+
+                if (!historicalData[currentCoin]) {
+                    historicalData[currentCoin] = {};
+                }
+
+                if (!historicalData[currentCoin][currentInterval]) {
+                    historicalData[currentCoin][currentInterval] = [];
+                }
+
+                // Add new candlestick data
+                historicalData[currentCoin][currentInterval].push([t, null, null, null, c]);
+
+                // Persist data in localStorage
+                storeData(currentCoin, currentInterval, historicalData[currentCoin][currentInterval]);
+
+                // Update the chart
+                updateChart(historicalData[currentCoin][currentInterval]);
+            }
+        }
+
+        // Connect WebSocket and listen for data
+        function connectWebSocket() {
+            const coin = document.getElementById('coinSelect').value;
+            const interval = document.getElementById('intervalSelect').value;
+
+            if (ws) {
+                ws.close();  // Close any existing WebSocket before opening a new one
+            }
+
+            const url = `wss://stream.binance.com:9443/ws/${coin}@kline_${interval}`;
+            ws = new WebSocket(url);
+
+            ws.onmessage = handleWebSocketMessage;
+
+            // Load historical data and update the chart
+            const previousData = fetchPreviousData(coin, interval);
+            if (previousData) {
+                historicalData[coin] = historicalData[coin] || {};
+                historicalData[coin][interval] = previousData;
+                updateChart(previousData);
+            }
+        }
+
+        // Event listeners for coin and interval change
+        document.getElementById('coinSelect').addEventListener('change', connectWebSocket);
+        document.getElementById('intervalSelect').addEventListener('change', connectWebSocket);
+
+        // Initialize the chart and WebSocket on page load
+        window.onload = function() {
+            createChart();
+            connectWebSocket();
+        };
+    </script>
+</body>
+</html>
